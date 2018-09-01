@@ -44,10 +44,9 @@ type B2 struct {
 	MaxIdleUploads int
 
 	// State
-	mutex      sync.Mutex
-	host       string
-	auth       *authorizationState
-	httpClient http.Client
+	mutex sync.Mutex
+	host  string
+	auth  *authorizationState
 }
 
 // The current auth state of the client. Can be individually invalidated by
@@ -270,19 +269,26 @@ func (c *B2) apiRequest(apiPath string, request interface{}, response interface{
 		log.Printf("apiRequest: %s %s", apiPath, body)
 	}
 
-	err = c.tryAPIRequest(apiPath, body, response)
-
-	// Retry after non-fatal errors
-	if b2err, ok := err.(*B2Error); ok {
-		if !b2err.IsFatal() && !c.NoRetry {
-			if c.Debug {
-				log.Printf("Retrying request %q due to error: %v", apiPath, err)
+	// Loop 10 times until we get a success, fatal error, or no retry
+	numTries := 0
+	for {
+		numTries++
+		err = c.tryAPIRequest(apiPath, body, response)
+		if err == nil {
+			return err
+		} else if b2err, ok := err.(*B2Error); ok {
+			if b2err.IsFatal() || c.NoRetry {
+				return err
 			}
+		}
 
-			return c.tryAPIRequest(apiPath, body, response)
+		if numTries >= 10 {
+			if c.Debug {
+				log.Printf("apiRequest: failed %d tries %s %s", numTries, apiPath, body)
+			}
+			return err
 		}
 	}
-	return err
 }
 
 func (c *B2) tryAPIRequest(apiPath string, body []byte, response interface{}) error {
